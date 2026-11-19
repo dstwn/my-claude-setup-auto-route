@@ -46,6 +46,9 @@ bash install-claude-setup.sh
 
 - `nested-claude start --tier auto` classifies a ticket (`auto-llm` adds a Haiku opinion) and picks tier, caps and model;
   `nested-claude classify <task-file>` previews the decision.
+- Every finished session appends one line (tier, model, turns, cost, status, PR yes/no; no ticket text) to
+  `~/.claude/nested/runs.jsonl`. `nested-claude report [--days N] [--json]` summarises it per tier/model and score bucket and,
+  once a group has 5+ sessions, suggests tuning the score thresholds.
 - Ticket keys look like `PROJ-123` and drive branch names and commit/PR-title prefixes. Team-specific conventions can be
   added as a skill (for example `ids-spec-parallel-pr`); `/nested-implement` uses it when installed.
 - Requires `python3`; the nested features need `gh`. Tested with stubs; behaviour against real Claude Code and GitHub

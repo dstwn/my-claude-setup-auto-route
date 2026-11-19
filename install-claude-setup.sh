@@ -715,6 +715,7 @@ install_file "$NESTED_BIN" << 'NESTLAUNCHEOF'
 #                              auto = klasifikasi heuristik dari task file (light/medium -> sonnet, heavy -> opus; --model eksplisit menang)
 #                              auto-llm = sama, tapi Haiku ikut menilai (gagal/timeout -> heuristik); override HEAVY tidak bisa diturunkan
 #   nested-claude classify TASK_FILE [--llm]    # tampilkan tier/model hasil klasifikasi tanpa menjalankan apa pun
+#   nested-claude report [--days N] [--json]    # rangkum riwayat sesi (runs.jsonl: tier, model, turn, biaya, hasil) + saran setel ambang
 #   nested-claude wait NAME [NAME...] [--timeout 540] [--stall 600]   # blokir sampai ada yang selesai/mati/macet/timeout
 #   nested-claude parent-branch --repo DIR --branch KEY-123-slug [--base REF] [--no-empty-commit] [--no-push]
 #   nested-claude repo-path OWNER/REPO         # cari clone lokal repo (nested-repos.txt atau $NESTED_WORKSPACE, default ~/Work)
@@ -779,7 +780,8 @@ PYCLS
   h_tier=$(printf '%s\n' "$out" | sed -n 's/^tier=//p'); h_score=$(printf '%s\n' "$out" | sed -n 's/^score=//p')
   h_over=$(printf '%s\n' "$out" | sed -n 's/^override=//p'); h_sig=$(printf '%s\n' "$out" | sed -n 's/^signals=//p')
   [ -n "$h_tier" ] || { h_tier=medium; h_score=?; }   # classifier rusak -> medium (aman)
-  CLS_TIER="$h_tier"; CLS_INFO="heuristik score=$h_score override=${h_over:-none} signals=${h_sig:-none}"
+  CLS_TIER="$h_tier"; CLS_SCORE="$h_score"; CLS_OVER="$h_over"; CLS_SIG="$h_sig"
+  CLS_INFO="heuristik score=$h_score override=${h_over:-none} signals=${h_sig:-none}"
   if [ "$use_llm" = llm ] && [ -z "$h_over" ] && command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
     local pr="Classify the engineering ticket below by implementation difficulty. Reply with exactly one word: light (small, local, known pattern), medium (several files or an integration, clear requirements) or heavy (architecture, security, data integrity, unclear root cause, large refactor). If unsure reply medium.
 
@@ -825,7 +827,8 @@ cmd_start() {
       *) die "opsi tidak dikenal: $1";;
     esac
   done
-  local d_turns d_budget
+  local d_turns d_budget tier_arg="$tier"
+  CLS_SCORE=""; CLS_OVER=""; CLS_SIG=""
   case "$tier" in auto|auto-llm)
     [ -f "$task_file" ] || die "--task-file tidak ditemukan: $task_file"
     classify_task "$task_file" "$([ "$tier" = auto-llm ] && echo llm)"
@@ -943,6 +946,19 @@ cmd_start() {
   } > "$S/prompt.md"
 
   echo "RUNNING" > "$S/status"; echo "$model/${tier:-none}" > "$S/model"
+  python3 -I - "$S/meta.json" "$tier" "${tier_arg:-manual}" "$model" "$turns" "$budget" "$CLS_SCORE" "$CLS_OVER" "$CLS_SIG" "$ids" "${fix_pr:+1}" "${stacked_on:+1}" << 'PYMETA' 2>/dev/null || true
+import json, sys
+p, tier, src, model, turns, budget, score, over, sig, ids, fix, stacked = sys.argv[1:13]
+def num(x):
+    try:
+        return float(x) if "." in x else int(x)
+    except ValueError:
+        return None
+json.dump({"tier": tier or "none", "tier_source": src if src in ("auto", "auto-llm") else "manual", "model": model,
+           "max_turns": num(turns), "max_budget_usd": num(budget), "score": num(score),
+           "override": [x for x in over.split(",") if x], "signals": [x for x in sig.split(",") if x],
+           "ids": ids or None, "kind": "fix" if fix else "ticket", "stacked": bool(stacked)}, open(p, "w"))
+PYMETA
   echo "nested-claude: worktree=$wt branch=$branch base=$base pr_base=${pr_base:-<default>} model=$model tier=${tier:-none} max_turns=$turns max_budget_usd=$budget"
   (
     cd "$wt" || exit 97
@@ -1002,9 +1018,135 @@ elif not out["pr_url"]:
 else:
     status = "DONE"
 json.dump(out, open(os.path.join(S, "result.json"), "w"), indent=2, ensure_ascii=False)
+try:   # satu baris per sesi untuk `nested-claude report` (tanpa teks tiket, hanya angka dan label)
+    import time
+    meta = {}
+    try:
+        meta = json.load(open(os.path.join(S, "meta.json")))
+    except Exception:
+        pass
+    row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "name": os.path.basename(S.rstrip("/")), "status": status,
+           "turns": out.get("num_turns"), "cost_usd": out.get("total_cost_usd"), "duration_ms": out.get("duration_ms"),
+           "pr": bool(out["pr_url"])}
+    row.update(meta)
+    with open(os.path.join(os.path.dirname(S.rstrip("/")), "runs.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+except Exception:
+    pass
 open(os.path.join(S, "status"), "w").write(status + "\n")
 print("FINISHED status=%s pr=%s turns=%s cost_usd=%s" % (status, out["pr_url"], out.get("num_turns"), out.get("total_cost_usd")))
 PY
+}
+
+cmd_report() {
+  local days="" as_json=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --days) days="${2:?--days butuh angka}"; shift 2;;
+      --json) as_json=1; shift;;
+      *) die "report: opsi tidak dikenal: $1";;
+    esac
+  done
+  python3 -I - "$STATE_ROOT/runs.jsonl" "${days:-0}" "${as_json:-}" << 'PYREPORT'
+import json, sys, time, collections
+path, days, as_json = sys.argv[1], int(sys.argv[2] or 0), sys.argv[3] == "1"
+rows = []
+try:
+    for line in open(path, encoding="utf-8", errors="replace"):
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            pass
+except FileNotFoundError:
+    pass
+if days:
+    cut = time.time() - days * 86400
+    def ts(r):
+        try:
+            return time.mktime(time.strptime(r["ts"][:19], "%Y-%m-%dT%H:%M:%S"))
+        except Exception:
+            return 0
+    rows = [r for r in rows if ts(r) >= cut]
+if not rows:
+    print("(belum ada riwayat sesi%s)" % (" dalam %d hari" % days if days else ""))
+    sys.exit(0)
+
+def agg(g):
+    n = len(g)
+    c = collections.Counter(r.get("status") for r in g)
+    cost = [r["cost_usd"] for r in g if isinstance(r.get("cost_usd"), (int, float))]
+    turns = [r["turns"] for r in g if isinstance(r.get("turns"), (int, float))]
+    cp = [r["cost_usd"] / r["max_budget_usd"] for r in g if isinstance(r.get("cost_usd"), (int, float)) and r.get("max_budget_usd")]
+    tp = [r["turns"] / r["max_turns"] for r in g if isinstance(r.get("turns"), (int, float)) and r.get("max_turns")]
+    avg = lambda x: sum(x) / len(x) if x else None
+    return {"n": n, "done": c["DONE"] / n, "limit": c["LIMIT"] / n, "failed": (c["FAILED"] + c["BLOCKED"] + c["DONE_NO_PR"] + c["STOPPED"]) / n,
+            "avg_turns": avg(turns), "avg_cost": avg(cost), "total_cost": sum(cost), "cost_of_cap": avg(cp), "turns_of_cap": avg(tp)}
+
+def bucket(r):
+    s = r.get("score")
+    if r.get("override"):
+        return "override"
+    if not isinstance(s, (int, float)):
+        return None
+    return "0-2" if s <= 2 else "3-5" if s <= 5 else "6+"
+
+groups = {
+    "tier/model": collections.defaultdict(list),
+    "asal tier": collections.defaultdict(list),
+    "skor (hanya auto)": collections.defaultdict(list),
+    "jenis": collections.defaultdict(list),
+}
+for r in rows:
+    groups["tier/model"]["%s/%s" % (r.get("tier", "?"), r.get("model", "?"))].append(r)
+    groups["asal tier"][r.get("tier_source", "?")].append(r)
+    groups["jenis"][r.get("kind", "?")].append(r)
+    b = bucket(r) if r.get("tier_source") in ("auto", "auto-llm") else None
+    if b:
+        groups["skor (hanya auto)"][b].append(r)
+
+res = {k: {kk: agg(v) for kk, v in sorted(g.items())} for k, g in groups.items()}
+total = agg(rows)
+hints = []
+MIN = 5
+for key, a in res["tier/model"].items():
+    if a["n"] < MIN:
+        continue
+    if a["limit"] >= 0.2:
+        hints.append("%s: %d%% sesi kena batas turn/biaya -> naikkan tier (turunkan ambang skor) atau naikkan batasnya." % (key, round(a["limit"] * 100)))
+    if a["failed"] >= 0.3:
+        hints.append("%s: %d%% sesi gagal/blocked/tanpa PR -> cek isi task file; tier lebih tinggi mungkin membantu." % (key, round(a["failed"] * 100)))
+    if a["done"] >= 0.9 and a["cost_of_cap"] is not None and a["cost_of_cap"] < 0.25 and not key.startswith("light"):
+        hints.append("%s: selesai %d%% dengan biaya rata-rata hanya %d%% dari batas -> kandidat tier lebih murah (naikkan ambang skor, atau longgarkan daftar kata kunci override)." % (key, round(a["done"] * 100), round(a["cost_of_cap"] * 100)))
+for key, a in res["skor (hanya auto)"].items():
+    if a["n"] >= MIN and key == "6+" and a["done"] >= 0.9 and a["cost_of_cap"] is not None and a["cost_of_cap"] < 0.3:
+        hints.append("skor 6+: %d%% selesai, biaya %d%% dari batas -> ambang HEAVY (6) mungkin terlalu rendah; coba 7." % (round(a["done"] * 100), round(a["cost_of_cap"] * 100)))
+    if a["n"] >= MIN and key == "0-2" and a["limit"] + a["failed"] >= 0.3:
+        hints.append("skor 0-2 (light): %d%% bermasalah -> heuristik terlalu optimis; tambah kata kunci MEDIUM atau turunkan ambang." % round((a["limit"] + a["failed"]) * 100))
+
+if as_json:
+    print(json.dumps({"total": total, "groups": res, "hints": hints}, indent=2, ensure_ascii=False))
+    sys.exit(0)
+
+def pct(x):
+    return "-" if x is None else "%d%%" % round(x * 100)
+def f(x, d=1):
+    return "-" if x is None else ("%.*f" % (d, x))
+print("Riwayat: %d sesi, total biaya $%.2f, selesai %s, kena batas %s, gagal %s\n" % (total["n"], total["total_cost"], pct(total["done"]), pct(total["limit"]), pct(total["failed"])))
+for title, g in res.items():
+    if not g:
+        continue
+    print("== %s" % title)
+    print("%-22s %4s %6s %6s %6s %8s %9s %9s %9s" % ("", "n", "DONE", "LIMIT", "GAGAL", "turn", "biaya", "%batas$", "%batasT"))
+    for k, a in g.items():
+        print("%-22s %4d %6s %6s %6s %8s %9s %9s %9s" % (k, a["n"], pct(a["done"]), pct(a["limit"]), pct(a["failed"]), f(a["avg_turns"], 0), "$" + f(a["avg_cost"], 2), pct(a["cost_of_cap"]), pct(a["turns_of_cap"])))
+    print()
+if hints:
+    print("Saran (butuh >= %d sesi per kelompok):" % MIN)
+    for h in hints:
+        print("  - " + h)
+else:
+    print("Belum ada saran: tiap kelompok butuh >= %d sesi dan pola yang jelas." % MIN)
+PYREPORT
 }
 
 cmd_parent_branch() {
@@ -1498,6 +1640,7 @@ case "${1:-}" in
   repo-path) shift; cmd_repo_path "$@";;
   list)   cmd_list;;
   classify) shift; cmd_classify "$@";;
+  report) shift; cmd_report "$@";;
   *) sed -n '2,/^set -/p' "$0" | sed '$d' >&2; exit 2;;
 esac
 NESTLAUNCHEOF
