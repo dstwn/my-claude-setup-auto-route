@@ -51,6 +51,10 @@ bash install-claude-setup.sh
   once a group has 5+ sessions, suggests tuning the score thresholds.
 - Ticket keys look like `PROJ-123` and drive branch names and commit/PR-title prefixes. Team-specific conventions can be
   added as a skill (for example `ids-spec-parallel-pr`); `/nested-implement` uses it when installed.
+- `/receiving-codereview` triages a person's PR feedback (fix / ask / push back / skip), fixes through `builder`, drafts
+  replies, and records general lessons in `.claude/review-lessons.md` (repo) or `~/.claude/review-lessons.md`. `builder`,
+  `critic`, `critic-lite` and nested sessions read the confirmed lessons first. Lessons never come from the agents' own
+  reviews, and unconfirmed ones stay under `## Pending`.
 - Requires `python3`; the nested features need `gh`. Tested with stubs; behaviour against real Claude Code and GitHub
   is not fully verified.
 

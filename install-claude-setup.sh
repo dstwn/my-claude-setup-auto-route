@@ -231,6 +231,8 @@ and implement changes.
 
 ## Rules
 - Follow the spec or plan. Don't redesign.
+- Before coding, read `.claude/review-lessons.md` (repo) and `~/.claude/review-lessons.md` if they exist and follow
+  the confirmed lessons (ignore the Pending section).
 - Match the repo's existing style and conventions.
 - Verify before reporting done: run the project's test and typecheck/build
   commands (see "Verify your work" in the project CLAUDE.md; if absent, find
@@ -262,6 +264,8 @@ task (TASK, RELEVANT FILES, RELEVANT SYMBOLS, CONSTRAINTS, EXPECTED RESULT) and 
 
 ## Rules
 - Follow the spec or plan. Don't redesign. Match the repo's style and conventions.
+- Before coding, read `.claude/review-lessons.md` (repo) and `~/.claude/review-lessons.md` if they exist and follow
+  the confirmed lessons (ignore the Pending section).
 - Stay inside your worktree; never write to the parent checkout.
 - Verify before reporting done: run the targeted checks (typecheck, lint, focused tests) from the project
   CLAUDE.md; if it has none, find them in package.json / Makefile / pyproject and say which you used.
@@ -304,6 +308,9 @@ fix. Use `git diff` / `git log` (read-only Bash) to see the changes.
 5. Tests: are the changed behaviors covered?
 6. Style: repo conventions.
 
+Before reviewing, read `.claude/review-lessons.md` (repo) and `~/.claude/review-lessons.md` if they exist and check
+the diff against each confirmed lesson (ignore the Pending section).
+
 ## Output
 - Verdict: PASS or FAIL
 - If FAIL: each issue with file, line, severity (critical/warning) and a
@@ -344,6 +351,9 @@ fix. Use `git diff` / `git log` (read-only Bash) to see the changes.
 4. Architecture: boundaries, abstractions, coupling.
 5. Tests: are the changed behaviors covered?
 6. Style: repo conventions.
+
+Before reviewing, read `.claude/review-lessons.md` (repo) and `~/.claude/review-lessons.md` if they exist and check
+the diff against each confirmed lesson (ignore the Pending section).
 
 ## Output
 - Verdict: PASS or FAIL
@@ -421,6 +431,7 @@ verification, escalate only when needed, concise answers.
 
 ## Team conventions (skills, loaded only when needed)
 - Running `/to-tickets` or breaking a spec into tickets: also invoke the `to-tickets-preferences` skill if it is installed.
+- A person's review feedback on a PR (comments, requested changes): use the `/receiving-codereview` skill.
 - Work that comes from a spec and tickets (`/to-tickets`, `/implement-spec`, `/nested-implement`): if a team-conventions
   skill such as `ids-spec-parallel-pr` is installed, invoke it; it overrides the defaults in `/nested-implement`
   (branch and PR naming, Mode A single PR or Mode B per-ticket PRs).
@@ -505,7 +516,7 @@ ROUTEEOF
 echo "✅ model-routing.md"
 
 # ─── Hook worktree: salin vendor/ dan .env* ke worktree baru ────────
-mkdir -p "$CLAUDE_DIR/bin" "$SKILL_DIR"
+mkdir -p "$CLAUDE_DIR/bin" "$SKILL_DIR" "$CLAUDE_DIR/skills/receiving-codereview"
 install_file "$WT_HOOK" << 'WTHOOKEOF'
 #!/bin/bash
 # WorktreeCreate hook (Claude Code): bikin git worktree LENGKAP dengan file lokal yang tidak ikut git
@@ -919,6 +930,7 @@ cmd_start() {
     echo "- Never ask questions: nobody can answer. Decide, and record every assumption in the PR description."
     echo "- If you are truly blocked, stop and make your final message start with \"BLOCKED:\" followed by the reason."
     echo "- Do not run /grill-with-docs, /to-spec or /to-tickets; the work is already specified below."
+    echo "- If \`.claude/review-lessons.md\` exists in the repo, read it first and follow its confirmed lessons."
     [ -n "$skill" ] && echo "- First invoke the \`$skill\` skill with the Skill tool and follow it for this task."
     if [ -n "$reuse" ]; then
       echo "- Work only in this directory: the existing git worktree on branch \`$branch\`. Never push to main/master, never force-push, never merge."
@@ -1863,6 +1875,63 @@ repos link the epic by full URL. Never merge anything. In Mode A the single draf
 NESTSKILLEOF
 echo "✅ skills/nested-implement/SKILL.md  (/nested-implement)"
 
+install_file "$CLAUDE_DIR/skills/receiving-codereview/SKILL.md" << 'RCSKILLEOF'
+---
+name: receiving-codereview
+description: >
+  Use when a person's review feedback arrives on a PR (comments, requested changes) or the user pastes review
+  points. Verify each point before acting, fix through builder, draft replies, and record the generalizable
+  lessons in review-lessons.md so future builds and reviews avoid the same findings.
+---
+
+# Receiving code review
+
+Feedback is input to evaluate, not an order. Never answer "you're right" before checking the code.
+
+## 1. Gather
+A PR URL or pasted points. For a PR (REST, trimmed):
+```bash
+gh api repos/<o>/<r>/pulls/<n>/comments --paginate --jq '.[] | {id, in_reply_to_id, path, line, user: .user.login, body}'
+gh api repos/<o>/<r>/pulls/<n>/reviews --jq '.[] | select(.body != "") | {user: .user.login, state, body}'
+gh api repos/<o>/<r>/issues/<n>/comments --jq '.[] | {id, user: .user.login, body}'
+```
+Skip threads already settled by a later commit or by a reply that ends the discussion.
+
+## 2. Triage (one line per point)
+- **FIX**: valid and clear, after you checked the code at that line.
+- **ASK**: ambiguous, or two points conflict. Collect all of them into ONE question to the user.
+- **PUSHBACK**: wrong, out of scope, or against the spec or acceptance criteria. Cite evidence (file:line, a test,
+  the spec). Polite, short, not defensive.
+- **SKIP**: praise, already fixed, or opinion with no impact (say so).
+If you cannot tell whether a point is valid, run the code or the test; do not guess.
+
+## 3. Act
+- Do the FIX points through `builder`: related points batched, one commit per logical group, tests run. For a PR from
+  a nested session use the fix-round flow of `/nested-implement` (`--reuse ... --fix-pr`).
+- Draft a reply per thread (what changed plus the commit, or the pushback evidence). Post only when the user asks.
+  Never resolve a thread on the reviewer's behalf.
+- Do not widen the diff beyond what the points need.
+
+## 4. Record lessons (this is how the agent improves)
+For each accepted point (a FIX, or a PUSHBACK the reviewer later accepted) ask: would this recur in other changes?
+Only a general rule counts: a repo convention, a pitfall, a preference. A one-off fix does not.
+- Source: a person's feedback or the user's own words. Never the output of `critic` / `critic-lite`: agents must not
+  teach themselves.
+- Where: repo-specific in `<repo>/.claude/review-lessons.md`; valid across repos in `~/.claude/review-lessons.md`.
+- Format, one line each: `- <imperative rule> — why: <reason> (PR #<n>, YYYY-MM)`.
+- Read the file first and merge duplicates instead of appending. Keep each file under 40 lines; when over, merge or
+  drop the least useful and tell the user.
+- Show the proposed lines and ask once before writing. If the user cannot answer, write them under
+  `## Pending (unconfirmed)`; Pending lines are not binding and are promoted only when the user confirms.
+- No secrets, customer data, or people's names in lessons.
+
+## 5. Report
+Counts (FIX / ASK / PUSHBACK / SKIP), commits pushed, replies drafted, lessons added or merged.
+`builder`, `critic` and `critic-lite` read the lessons files first, so a confirmed lesson becomes both a coding rule
+and a review check.
+RCSKILLEOF
+echo "✅ skills/receiving-codereview/SKILL.md  (/receiving-codereview)"
+
 
 
 # ─── CLAUDE.md: hanya @import (idempotent) ──────────────────────────
@@ -2013,6 +2082,7 @@ if grep -q 'worktree-create.sh' "$SETTINGS" 2>/dev/null; then
 fi
 echo "  Auto-routing: nested-claude --tier auto (heuristik) / auto-llm (+Haiku); preview: nested-claude classify <task-file>"
 echo "                Hook PreModelSwitch: /model dengan konteks >= 40k token + cache hangat -> konfirmasi berisi biaya (ambang: CLAUDE_SWITCH_GUARD_TOKENS)"
+echo "  Review: /receiving-codereview memverifikasi feedback PR dan mencatat pelajaran ke .claude/review-lessons.md (dibaca builder, critic, sesi nested)"
 echo "  Status line: model · effort · konteks · sesi nested yang jalan (hanya menampilkan keadaan nyata, bukan keputusan routing)"
 echo "  Catatan: isi \"Verify your work\" (perintah test/build) di CLAUDE.md tiap project"
 echo "  4. Opsional: pip install claude-status && claude-status --setup"
