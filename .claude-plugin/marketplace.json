@@ -1,0 +1,5 @@
+{
+  "name": "my-claude-setup",
+  "owner": { "name": "dstwn" },
+  "plugins": [{ "name": "auto-route", "source": "./" }]
+}

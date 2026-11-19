@@ -1,0 +1,9 @@
+{
+  "name": "auto-route",
+  "version": "0.1.0",
+  "description": "Per-prompt routing of model and effort (light / standard / deep) with a label above the prompt and a cache-aware guard.",
+  "author": { "name": "dstwn" },
+  "license": "MIT",
+  "repository": "https://github.com/dstwn/my-claude-setup-auto-route",
+  "types": "./types/index.d.ts"
+}
