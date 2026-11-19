@@ -1,7 +1,7 @@
 # my-claude-setup-auto-route
 
 A personal Claude Code setup for cheaper workflows. Unofficial, not affiliated with Anthropic.
-For now it holds one plugin.
+It has two independent parts.
 
 ## 1. `auto-route` (mod / plugin)
 
@@ -32,6 +32,24 @@ From a shell:
 ```
 claude plugin install auto-route --marketplace dstwn/my-claude-setup-auto-route
 ```
+
+## 2. `install-claude-setup.sh` (generic core)
+
+One idempotent script that writes only to `~/.claude/` (backups as `*.bak-<timestamp>`): model-tiered subagents
+(`scout`/`Explore` Haiku, `builder`, `critic` Opus, `critic-lite` Sonnet), routing rules, a read-only Bash hook,
+a worktree hook that copies `.env*` and `vendor/`, `nested-claude` (separate `claude -p` sessions per ticket, with a
+`/nested-implement` supervisor skill), a `PreModelSwitch` cache guard and a status line.
+
+```
+bash install-claude-setup.sh
+```
+
+- `nested-claude start --tier auto` classifies a ticket (`auto-llm` adds a Haiku opinion) and picks tier, caps and model;
+  `nested-claude classify <task-file>` previews the decision.
+- Ticket keys look like `PROJ-123` and drive branch names and commit/PR-title prefixes. Team-specific conventions can be
+  added as a skill (for example `ids-spec-parallel-pr`); `/nested-implement` uses it when installed.
+- Requires `python3`; the nested features need `gh`. Tested with stubs; behaviour against real Claude Code and GitHub
+  is not fully verified.
 
 ## License
 
