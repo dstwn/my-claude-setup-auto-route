@@ -1,0 +1,8 @@
+#!/bin/bash
+# `claude` palsu untuk tes nested-claude. STUB_KIND: ok | limit | block. Argumen dicatat per baris ke $STUB_OUT.
+printf '%s\n' "$@" > "${STUB_OUT:-/dev/null}"
+case "${STUB_KIND:-ok}" in
+  ok)    echo "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"PR: https://github.com/o/r/pull/1\",\"num_turns\":${STUB_TURNS:-10},\"total_cost_usd\":${STUB_COST:-0.4},\"duration_ms\":5000}";;
+  limit) echo "{\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":false,\"result\":\"\",\"num_turns\":${STUB_TURNS:-60},\"total_cost_usd\":${STUB_COST:-2.5}}";;
+  block) echo '{"type":"result","subtype":"success","result":"BLOCKED: need input","num_turns":3,"total_cost_usd":0.1}';;
+esac

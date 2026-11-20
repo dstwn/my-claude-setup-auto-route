@@ -58,6 +58,19 @@ bash install-claude-setup.sh
 - Requires `python3`; the nested features need `gh`. Tested with stubs; behaviour against real Claude Code and GitHub
   is not fully verified.
 
+## Tests
+
+```
+bash tests/run.sh          # all suites (about 10 s); needs bash, python3, git
+bash tests/run.sh nested   # only suites whose file name contains "nested"
+```
+
+The suites run the installer into a throwaway `HOME` and drive `nested-claude` with a stub `claude` (`tests/stubs/claude`),
+so they need no network, no `gh` and no API key. They cover installer idempotency and settings merge, the read-only Bash
+hook, the model-switch guard, the status line, ticket classification, tier caps, the deny list for pushes, run logging and
+`report`. They do not cover real Claude Code or GitHub behaviour. The `auto-route` mod has its own tests
+(`claude plugin test .`), which need the `claude` CLI and are not part of CI.
+
 ## License
 
 MIT
