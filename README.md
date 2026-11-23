@@ -58,6 +58,23 @@ bash install-claude-setup.sh
 - Requires `python3`; the nested features need `gh`. Tested with stubs; behaviour against real Claude Code and GitHub
   is not fully verified.
 
+## Uninstall
+
+```
+bash uninstall-claude-setup.sh --dry-run     # show the plan, change nothing
+bash uninstall-claude-setup.sh               # asks before doing it (use --yes when not interactive)
+```
+
+Nothing is deleted: removed files, plus copies of `settings.json` and `CLAUDE.md` as they were, go to
+`~/.claude/uninstalled-<timestamp>/`. It removes only what the installer wrote (agents, hooks, `nested-claude`, status line,
+routing file and the two skills), our own hook and `statusLine` entries in `settings.json`, and the `@import` line in
+`CLAUDE.md`. It refuses to run while a nested session is alive.
+
+Options: `--purge` also moves `~/.claude/nested` (session history), `--with-ids-layer` also removes the private IDS skills.
+Never touched: `review-lessons.md`, `nested-allow.txt`, `*.bak-*`, your own agents/skills/hooks, `"model": "opus"` (the
+installer overwrote your previous value; look in `settings.json.bak-*`) and the git read-only allow rules.
+The plugin is removed separately: `/plugin uninstall auto-route`.
+
 ## Tests
 
 ```
