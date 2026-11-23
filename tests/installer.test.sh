@@ -17,7 +17,7 @@ done
 for f in hooks/readonly-bash.py hooks/worktree-create.sh hooks/model-switch-guard.py bin/nested-claude statusline.py model-routing.md \
          skills/nested-implement/SKILL.md skills/receiving-codereview/SKILL.md; do assert_file "$C/$f"; done
 assert_contains "$(cat "$C/CLAUDE.md" 2>/dev/null)" "model-routing.md" "CLAUDE.md mengimpor routing"
-r=$(cat "$C/model-routing.md")
+r=$(tr -s " \n" "  " < "$C/model-routing.md")   # ratakan pergantian baris
 assert_contains "$r" "Scope decides" "routing: lingkup menentukan delegasi"
 assert_contains "$r" "in ONE message" "routing: panggilan paralel dalam satu pesan"
 assert_contains "$r" "at most 4 at once" "routing: batas scout paralel"
