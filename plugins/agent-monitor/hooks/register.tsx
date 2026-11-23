@@ -31,12 +31,26 @@ export function fmt(ms: number): string {
 
 type Live = { id: string; status: string }
 
+export function icon(status: string): string {
+  if (['pending', 'running', 'waiting'].includes(status)) return '●'
+  if (status === 'failed' || status === 'killed') return '✗'
+  if (status === 'idle') return '○'
+  return '✓'
+}
+
+export function tone(status: string, warned: boolean): string {
+  if (warned) return 'yellow'
+  if (['pending', 'running', 'waiting'].includes(status)) return 'green'
+  if (status === 'failed' || status === 'killed') return 'red'
+  return 'gray'
+}
+
 export function lines(list: Run[], live: Live[], now: number): string[] {
   const st = new Map(live.map(a => [a.id, a.status]))
   return list.map(r => {
     const s = st.get(r.id) ?? 'done'
     const w = r.note ? ` ⚠ ${r.note}` : ''
-    return `${s.padEnd(9)} ${r.type.padEnd(14)} ${(r.model || '?').padEnd(18)} ${fmt(now - r.at).padStart(6)}  ${r.asked}${w}`
+    return `${icon(s)} ${s.padEnd(9)} ${r.type.padEnd(14)} ${(r.model || '?').padEnd(18)} ${fmt(now - r.at).padStart(6)}  ${r.asked}${w}`
   })
 }
 
@@ -142,19 +156,46 @@ export const register: Register = on => {
     const body = lines(list.slice(-room), live, now)
     const nest = await nested($)
 
+    const n = running(list, live)
+    const bad = list.filter(r => r.note).length
+    const st = new Map(live.map(x => [x.id, x.status]))
+
     return (
-      <Box flexDirection="column">
-        <Text bold>
-          running {running(list, live)} · peak {hi} · total {list.length}
-        </Text>
-        {body.length === 0 && <Text dimColor>No subagents yet.</Text>}
-        {body.map(l => (
-          <Text dimColor={l.startsWith('done')}>{l}</Text>
-        ))}
-        {nest.length > 0 && <Text bold>nested sessions</Text>}
-        {nest.map(l => (
-          <Text dimColor={!l.startsWith('RUNNING')}>{l}</Text>
-        ))}
+      <Box flexDirection="column" gap={1}>
+        <Box gap={2}>
+          <Text bold color={n > 0 ? 'green' : 'gray'}>
+            {`● ${n} running`}
+          </Text>
+          <Text bold>{`⇉ peak ${hi}`}</Text>
+          <Text dimColor>{`Σ ${list.length}`}</Text>
+          {bad > 0 && <Text bold color="yellow">{`⚠ ${bad} mismatch`}</Text>}
+        </Box>
+        {list.length === 0 && <Text dimColor>No subagents yet. They show up here as they spawn.</Text>}
+        <Box flexDirection="column">
+          {list.length > 0 && (
+            <Text dimColor>
+              {`  ${'STATUS'.padEnd(9)} ${'TYPE'.padEnd(14)} ${'MODEL'.padEnd(18)} ${'TIME'.padStart(6)}  TASK`}
+            </Text>
+          )}
+          {list.slice(-room).map(r => {
+            const status = st.get(r.id) ?? 'done'
+            return (
+              <Text color={tone(status, !!r.note)} dimColor={status === 'done' || status === 'completed'}>
+                {`${icon(status)} ${status.padEnd(9)} ${r.type.padEnd(14)} ${(r.model || '?').padEnd(18)} ${fmt(now - r.at).padStart(6)}  ${r.asked}${r.note ? `  ⚠ ${r.note}` : ''}`}
+              </Text>
+            )
+          })}
+        </Box>
+        {nest.length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>nested sessions</Text>
+            {nest.map(l => (
+              <Text color={l.startsWith('RUNNING') ? 'green' : undefined} dimColor={!l.startsWith('RUNNING')}>
+                {`${l.startsWith('RUNNING') ? '●' : '○'} ${l}`}
+              </Text>
+            ))}
+          </Box>
+        )}
       </Box>
     )
   })
