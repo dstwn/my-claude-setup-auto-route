@@ -91,3 +91,13 @@ hook, the model-switch guard, the status line, ticket classification, tier caps,
 ## License
 
 MIT
+
+## agent-monitor (mod)
+
+Watches subagents: `/monitor` prints running count, peak parallel, and the last runs
+(type, actual model, duration). A pane titled "Agents" shows the same live.
+Rows get a warning when the model differs from the routing map
+(scout/Explore -> haiku, critic -> opus, critic-lite -> sonnet), which also reveals
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
+
+    /plugin install agent-monitor --marketplace dstwn/my-claude-setup-auto-route

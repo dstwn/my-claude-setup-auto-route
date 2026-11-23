@@ -1,5 +1,8 @@
 {
   "name": "my-claude-setup",
   "owner": { "name": "dstwn" },
-  "plugins": [{ "name": "auto-route", "source": "./" }]
+  "plugins": [
+    { "name": "auto-route", "source": "./" },
+    { "name": "agent-monitor", "source": "./plugins/agent-monitor" }
+  ]
 }

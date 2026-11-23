@@ -1,0 +1,1 @@
+{ "name": "agent-monitor", "version": "0.1.0", "description": "Pane and /monitor command that watch subagents: type, actual model, parallel count, duration, and a warning when the model differs from the routing map.", "types": "./types/index.d.ts" }
