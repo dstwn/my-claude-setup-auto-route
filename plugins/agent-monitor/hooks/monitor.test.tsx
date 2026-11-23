@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { fmt, lines, running, warn } from './register'
+import { fmt, lines, nested, running, warn } from './register'
 
 test('warn flags a model outside the expected family', () => {
   expect(warn('scout', 'claude-haiku-5-5')).toBe('')
@@ -28,4 +28,26 @@ test('/monitor answers in plain text', async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const r = await $.command.run({ command: 'monitor' })
   expect(JSON.stringify(r)).toContain('no subagents yet')
+})
+
+test('nested reads status and model per session, and survives a missing dir', async () => {
+  const files: Record<string, string> = {
+    '~/.claude/nested/PROJ-1/status': 'RUNNING\n',
+    '~/.claude/nested/PROJ-1/model': 'sonnet/light',
+  }
+  const ok = {
+    fs: {
+      list: async () => [{ name: 'PROJ-1', kind: 'dir' }, { name: 'x.txt', kind: 'file' }],
+      read: async (p: string) => {
+        if (!(p in files)) throw new Error('nope')
+        return files[p]
+      },
+    },
+  }
+  const got = await nested(ok)
+  expect(got.length).toBe(1)
+  expect(got[0]).toContain('RUNNING')
+  expect(got[0]).toContain('PROJ-1')
+  expect(got[0]).toContain('sonnet/light')
+  expect(await nested({ fs: { list: async () => { throw new Error('x') } } })).toEqual([])
 })

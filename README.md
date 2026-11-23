@@ -98,6 +98,6 @@ Watches subagents: `/monitor` prints running count, peak parallel, and the last 
 (type, actual model, duration). A pane titled "Agents" shows the same live.
 Rows get a warning when the model differs from the routing map
 (scout/Explore -> haiku, critic -> opus, critic-lite -> sonnet), which also reveals
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`.
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. Also lists nested-claude sessions (status + model) from `~/.claude/nested`.
 
     /plugin install agent-monitor --marketplace dstwn/my-claude-setup-auto-route

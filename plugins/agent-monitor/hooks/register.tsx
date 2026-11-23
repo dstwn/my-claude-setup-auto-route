@@ -45,6 +45,29 @@ export function running(list: Run[], live: Live[]): number {
   return list.filter(r => ['pending', 'running', 'waiting'].includes(st.get(r.id) ?? '')).length
 }
 
+const NESTED = '~/.claude/nested'
+
+// Nested sessions written by `nested-claude`: <NAME>/status + <NAME>/model. Best effort.
+export async function nested($: any): Promise<string[]> {
+  try {
+    const dirs = (await $.fs.list(NESTED)) as { name: string; kind: string }[]
+    const out: string[] = []
+    for (const d of dirs.filter(x => x.kind === 'dir').slice(-8)) {
+      const rd = async (f: string) => {
+        try {
+          return String(await $.fs.read(`${NESTED}/${d.name}/${f}`)).trim()
+        } catch {
+          return '?'
+        }
+      }
+      out.push(`${(await rd('status')).padEnd(9)} ${d.name.padEnd(20)} ${await rd('model')}`)
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
 async function snapshot($: any): Promise<{ list: Run[]; live: Live[]; hi: number }> {
   const list = await read($, runs)
   const hi = await read($, peak)
@@ -100,7 +123,15 @@ export const register: Register = on => {
     const bad = list.filter(r => r.note).length
     const head = `running ${running(list, live)} · peak parallel ${hi} · total ${list.length}` + (bad ? ` · ⚠ ${bad} model mismatch` : '')
 
-    return { text: [head, ...(body.length ? body : ['no subagents yet'])].join('\n') }
+    const nest = await nested($)
+
+    return {
+      text: [
+        head,
+        ...(body.length ? body : ['no subagents yet']),
+        ...(nest.length ? ['', 'nested sessions:', ...nest] : []),
+      ].join('\n'),
+    }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -109,6 +140,7 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const room = Math.max(1, (e.viewport?.rows ?? 24) - 5)
     const body = lines(list.slice(-room), live, now)
+    const nest = await nested($)
 
     return (
       <Box flexDirection="column">
@@ -118,6 +150,10 @@ export const register: Register = on => {
         {body.length === 0 && <Text dimColor>No subagents yet.</Text>}
         {body.map(l => (
           <Text dimColor={l.startsWith('done')}>{l}</Text>
+        ))}
+        {nest.length > 0 && <Text bold>nested sessions</Text>}
+        {nest.map(l => (
+          <Text dimColor={!l.startsWith('RUNNING')}>{l}</Text>
         ))}
       </Box>
     )
