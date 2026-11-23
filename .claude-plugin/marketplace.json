@@ -1,8 +1,20 @@
 {
   "name": "my-claude-setup",
-  "owner": { "name": "dstwn" },
+  "owner": {
+    "name": "dstwn"
+  },
   "plugins": [
-    { "name": "auto-route", "source": "./" },
-    { "name": "agent-monitor", "source": "./plugins/agent-monitor" }
+    {
+      "name": "auto-route",
+      "source": "./"
+    },
+    {
+      "name": "agent-monitor",
+      "source": "./plugins/agent-monitor"
+    },
+    {
+      "name": "code-watch",
+      "source": "./plugins/code-watch"
+    }
   ]
 }

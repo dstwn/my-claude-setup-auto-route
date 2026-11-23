@@ -1,0 +1,1 @@
+{ "name": "code-watch", "version": "0.1.0", "description": "Live pane of files and symbols the agent touches, plus /review: per-file notes with LOW/MEDIUM/HIGH risk for a diff.", "types": "./types/index.d.ts" }

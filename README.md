@@ -101,3 +101,16 @@ Rows get a warning when the model differs from the routing map
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. Also lists nested-claude sessions (status + model) from `~/.claude/nested`.
 
     /plugin install agent-monitor --marketplace dstwn/my-claude-setup-auto-route
+
+## code-watch (mod)
+
+Pane "Code watch": every file the agent edits (Edit/Write/MultiEdit/NotebookEdit) with +/- lines
+and the symbols (def/class/function) in the change; the latest one is highlighted for 10 seconds.
+
+`/code-watch review [base]` writes per-file review notes with LOW/MEDIUM/HIGH risk from `git diff`
+(no base = uncommitted work, with base = `base...HEAD`). Risk is heuristic: a changed signature or
+removed definition is HIGH, a new definition or a big diff MEDIUM. Add `--ai` to also ask the model
+(sonnet) for a one-line note per file; that sends up to 12 KB of the diff to the model and costs tokens.
+Without `--ai` nothing leaves your machine.
+
+    /plugin install code-watch --marketplace dstwn/my-claude-setup-auto-route
