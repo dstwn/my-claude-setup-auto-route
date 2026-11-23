@@ -386,8 +386,9 @@ when leading many subagents). Do not raise effort above `high` by default:
 test the next model up at a lower effort first.
 
 ## Delegation rules
-- Do not spawn a subagent if you can finish the work in this session. If you delegate: the smallest
-  independent task, one subagent = one responsibility.
+- Scope decides. Narrow work (one or two files, a known location, a question the loaded context already
+  answers) stays in this session. Wide work is delegated, and independent parts run in PARALLEL: put all the
+  Agent calls in ONE message. One subagent = one responsibility, the smallest independent task.
 - Subagents do NOT see this conversation. Every delegation prompt is self-contained and has exactly these
   parts: TASK, RELEVANT FILES, RELEVANT SYMBOLS, CONSTRAINTS, EXPECTED RESULT (plus acceptance criteria and
   the spec/ticket location when they exist).
@@ -402,9 +403,15 @@ test the next model up at a lower effort first.
   `/diagnosing-bugs` -> `scout` then `builder`; `/tdd`, `/prototype` ->
   `builder`; `/improve-codebase-architecture` -> `critic`;
   `/start-issue` -> `scout`, then continue the chain.
-- Edits that must run in parallel use `builder-isolated` (its own git worktree, `isolation: worktree`), and only
-  for tickets that touch disjoint files; a normal sequential edit uses `builder`. Every isolated run copies
-  `vendor/` and `.env*` into a new worktree (disk and time), so never use it for small edits.
+- Parallel fan-out, only for pieces that are truly independent (defaults, lower them when in doubt):
+  - Read-only: 3+ separate areas, modules or questions -> one `scout` per area, at most 4 at once.
+  - Review: several independent diffs or PRs -> one `critic-lite` / `critic` per diff, at most 4 at once.
+  - Edits: tickets that touch disjoint files and do not need each other's output -> `builder-isolated`, at most
+    3 at once, then merge the branches yourself. Overlapping files, a shared migration, or one piece needing
+    another's result stay sequential on `builder`.
+  - Never parallelize steps that depend on a previous result, and never fan out a small task just to save time.
+  Every isolated run copies `vendor/` and `.env*` into a new worktree (disk and time), so never use it for
+  small edits.
 - Never retry a failed step on the same agent more than once, and never repeat the same failed strategy:
   scout poor -> `builder`; builder poor -> main session; `critic`/`critic-lite` findings
   go to `builder` to fix (reviewers never fix).
