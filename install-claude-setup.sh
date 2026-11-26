@@ -734,6 +734,8 @@ install_file "$NESTED_BIN" << 'NESTLAUNCHEOF'
 #                              auto-llm = sama, tapi Haiku ikut menilai (gagal/timeout -> heuristik); override HEAVY tidak bisa diturunkan
 #   nested-claude classify TASK_FILE [--llm]    # tampilkan tier/model hasil klasifikasi tanpa menjalankan apa pun
 #   nested-claude report [--days N] [--json]    # rangkum riwayat sesi (runs.jsonl: tier, model, turn, biaya, hasil) + saran setel ambang
+#   nested-claude escalate NAME [--dry-run]     # sesi NAME berakhir LIMIT/FAILED/DONE_NO_PR di tier light/medium: jalankan lagi satu tier di atasnya,
+#                                               # di worktree & cabang yang sama (sesi baru NAME-esc). BLOCKED/STOPPED/DONE tidak dinaikkan.
 #   nested-claude wait NAME [NAME...] [--timeout 540] [--stall 600]   # blokir sampai ada yang selesai/mati/macet/timeout
 #   nested-claude parent-branch --repo DIR --branch KEY-123-slug [--base REF] [--no-empty-commit] [--no-push]
 #   nested-claude repo-path OWNER/REPO         # cari clone lokal repo (nested-repos.txt atau $NESTED_WORKSPACE, default ~/Work)
@@ -822,6 +824,7 @@ cmd_classify() {
 }
 
 cmd_start() {
+  local -a ORIG=("$@")   # argumen asli, disimpan supaya `escalate` bisa mengulang sesi satu tier di atas
   local model_set="" name="" branch="" task_file="" model="opus" turns="" budget="" tier="" repo="" base="" skill="" stacked_on="" pr_base="" reuse="" fix_pr="" ids="" draft=""
   local -a extra_allow=()
   while [ $# -gt 0 ]; do
@@ -880,6 +883,7 @@ cmd_start() {
   local S="$STATE_ROOT/$name"
   if [ -f "$S/pid" ] && alive "$(cat "$S/pid")"; then die "sesi '$name' masih berjalan (pid $(cat "$S/pid"))"; fi
   rm -rf "$S"; mkdir -p "$S"
+  printf '%s\0' "${ORIG[@]}" > "$S/argv"
 
   local wt
   if [ -n "$reuse" ]; then   # ronde perbaikan: pakai ulang worktree & cabang dari sesi sebelumnya
@@ -966,7 +970,7 @@ cmd_start() {
 
   echo "RUNNING" > "$S/status"; echo "$model/${tier:-none}" > "$S/model"
   python3 -I - "$S/meta.json" "$tier" "${tier_arg:-manual}" "$model" "$turns" "$budget" "$CLS_SCORE" "$CLS_OVER" "$CLS_SIG" "$ids" "${fix_pr:+1}" "${stacked_on:+1}" << 'PYMETA' 2>/dev/null || true
-import json, sys
+import json, os, sys
 p, tier, src, model, turns, budget, score, over, sig, ids, fix, stacked = sys.argv[1:13]
 def num(x):
     try:
@@ -976,7 +980,8 @@ def num(x):
 json.dump({"tier": tier or "none", "tier_source": src if src in ("auto", "auto-llm") else "manual", "model": model,
            "max_turns": num(turns), "max_budget_usd": num(budget), "score": num(score),
            "override": [x for x in over.split(",") if x], "signals": [x for x in sig.split(",") if x],
-           "ids": ids or None, "kind": "fix" if fix else "ticket", "stacked": bool(stacked)}, open(p, "w"))
+           "ids": ids or None, "kind": "fix" if fix else "ticket", "stacked": bool(stacked),
+           "escalated_from": os.environ.get("NESTED_ESC_FROM") or None}, open(p, "w"))
 PYMETA
   echo "nested-claude: worktree=$wt branch=$branch base=$base pr_base=${pr_base:-<default>} model=$model tier=${tier:-none} max_turns=$turns max_budget_usd=$budget"
   (
@@ -1055,6 +1060,56 @@ except Exception:
 open(os.path.join(S, "status"), "w").write(status + "\n")
 print("FINISHED status=%s pr=%s turns=%s cost_usd=%s" % (status, out["pr_url"], out.get("num_turns"), out.get("total_cost_usd")))
 PY
+}
+
+cmd_escalate() {
+  local name="" dry=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry=1; shift;;
+      -*) die "escalate: opsi tidak dikenal: $1";;
+      *) [ -z "$name" ] || die "escalate: hanya satu NAME"; name="$1"; shift;;
+    esac
+  done
+  [ -n "$name" ] || die "pakai: escalate NAME [--dry-run]"
+  case "$name" in *[!A-Za-z0-9._-]*) die "NAME hanya boleh huruf, angka, . _ -";; esac
+  local S="$STATE_ROOT/$name"; [ -d "$S" ] || die "tidak ada sesi: $name"
+  local st; st=$(cat "$S/status" 2>/dev/null || echo UNKNOWN)
+  case "$st" in
+    LIMIT|FAILED|DONE_NO_PR) ;;
+    RUNNING) die "escalate: sesi '$name' masih berjalan";;
+    *) die "escalate: status $st tidak dinaikkan tier (hanya LIMIT, FAILED, DONE_NO_PR)";;
+  esac
+  [ -f "$S/argv" ] || die "escalate: sesi '$name' tidak punya catatan argumen; jalankan ulang start dengan --tier lebih tinggi"
+  local cur next model
+  cur=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("tier",""))' "$S/meta.json" 2>/dev/null || true)
+  case "$cur" in
+    light)  next=medium; model=sonnet;;
+    medium) next=heavy;  model=opus;;
+    *) die "escalate: tier '${cur:-?}' sudah tertinggi atau tidak diketahui; tidak ada tier di atasnya";;
+  esac
+  local -a orig=(); mapfile -d '' -t orig < "$S/argv"
+  local -a keep=(); local i=0 a tf=""
+  while [ "$i" -lt "${#orig[@]}" ]; do
+    a="${orig[$i]}"
+    case "$a" in
+      --task-file) tf="${orig[$((i+1))]:-}"; i=$((i+2));;
+      --name|--tier|--model|--max-turns|--max-budget|--reuse|--base) i=$((i+2));;
+      --draft) keep+=("$a"); i=$((i+1));;
+      *) keep+=("$a" "${orig[$((i+1))]:-}"); i=$((i+2));;
+    esac
+  done
+  [ -f "$tf" ] || die "escalate: task file asli tidak ditemukan: $tf"
+  local root="${name%%-esc*}" n=1 cand
+  cand="$root-esc"
+  while [ -e "$STATE_ROOT/$cand" ]; do n=$((n+1)); cand="$root-esc$n"; done
+  if [ -n "$dry" ]; then
+    echo "escalate: $name ($st, tier $cur) -> $cand (tier $next, model $model, lanjut di worktree $(cat "$S/worktree" 2>/dev/null))"
+    return 0
+  fi
+  local ext="$S/escalation-task.md"
+  { cat "$tf"; printf '\n\nESCALATION NOTE: an earlier attempt on a cheaper tier ended with status %s in this same worktree. Run git log and git status first, keep the work that is already correct, and continue from there instead of starting over.\n' "$st"; } > "$ext"
+  NESTED_ESC_FROM="$name" cmd_start --name "$cand" --reuse "$name" --tier "$next" --model "$model" --task-file "$ext" ${keep[@]+"${keep[@]}"}
 }
 
 cmd_report() {
@@ -1660,6 +1715,7 @@ case "${1:-}" in
   list)   cmd_list;;
   classify) shift; cmd_classify "$@";;
   report) shift; cmd_report "$@";;
+  escalate) shift; cmd_escalate "$@";;
   *) sed -n '2,/^set -/p' "$0" | sed '$d' >&2; exit 2;;
 esac
 NESTLAUNCHEOF
@@ -1842,7 +1898,10 @@ Process `plan` by `wave`:
 - Cross-repo blockers only order the work; never stack across repos.
 - Failures: a ticket that ends BLOCKED, LIMIT, FAILED, DONE_NO_PR, STOPPED, fails verification, or stays in
   review FAIL after 2 fix rounds is FAILED. Skip its dependents (transitively, including stacked ones);
-  independent tickets continue. Report each failure with its reason, the logs, and options (relaunch it with
+  independent tickets continue. Exception, once per ticket: a ticket that ends LIMIT, FAILED or DONE_NO_PR on tier
+  LIGHT or MEDIUM gets `nested-claude escalate <NAME>` (same worktree and branch, one tier up, new session
+  `<NAME>-esc`); treat only the escalated session's outcome as final. Never escalate BLOCKED or STOPPED, and
+  not a HEAVY ticket. Report each failure with its reason, the logs, and options (relaunch it with
   adjusted limits/allowlist, or `claude --resume <session_id>` in its worktree).
 - A `BLOCKED:` caused by a dependency nobody recorded (e.g. needs code from a later ticket): treat as FAILED
   for that ticket; do NOT reorder once PRs exist. Report the missing dependency; adding it as a "blocked by"

@@ -114,3 +114,12 @@ removed definition is HIGH, a new definition or a big diff MEDIUM. Add `--ai` to
 Without `--ai` nothing leaves your machine.
 
     /plugin install code-watch --marketplace dstwn/my-claude-setup-auto-route
+
+## Escalate on failure
+
+`nested-claude escalate NAME [--dry-run]` re-runs a finished session one tier up when it ended
+`LIMIT`, `FAILED` or `DONE_NO_PR` on tier light or medium (light -> medium/sonnet, medium -> heavy/opus).
+It continues in the same worktree and branch as a new session `NAME-esc`, with the original task plus a
+note to check `git log` first, and keeps the other original options (`--skill`, `--ids`, `--allow`, ...).
+`BLOCKED`, `STOPPED`, `DONE` and heavy sessions are refused. The `nested-implement` skill escalates a failed
+ticket once; `runs.jsonl` records `escalated_from`, so `nested-claude report` data shows how often cheap tiers fail.

@@ -84,5 +84,46 @@ assert_contains "$("$N" parent-branch --repo "$REPO" --branch IDS-958-x --no-pus
 "$N" parent-branch --repo "$REPO" --branch bad-branch --no-push >/dev/null 2>&1; [ $? -ne 0 ] && ok || bad "parent-branch tanpa key harus gagal"
 assert_contains "$(git -C "$REPO" log --all --format=%s)" "PROJ-12: integration branch" "commit kosong parent"
 
+# escalate: naik satu tier saat LIMIT/FAILED/DONE_NO_PR, di worktree yang sama
+run e1 light limit 60 2.5 --tier auto --ids PROJ-1 --skill poteto-mode
+assert_eq "$(cat "$H/nested/e1/status")" LIMIT "escalate: e1 LIMIT"
+assert_contains "$("$N" escalate e1 --dry-run)" "e1-esc (tier medium, model sonnet" "escalate --dry-run"
+assert_no_file "$H/nested/e1-esc" "dry-run tidak membuat sesi"
+STUB_OUT="$H/args-e1esc" STUB_KIND=ok STUB_TURNS=30 STUB_COST=1.2 "$N" escalate e1 >"$H/out-e1esc" 2>&1
+assert_eq "$(cat "$H/nested/e1-esc/status")" DONE "escalate: e1-esc selesai"
+assert_eq "$(arg e1esc --model)" sonnet "escalate light->medium: model"
+assert_eq "$(arg e1esc --max-turns)" 100 "escalate light->medium: turn"
+assert_eq "$(arg e1esc --max-budget-usd)" 6 "escalate light->medium: biaya"
+assert_eq "$(cat "$H/nested/e1-esc/worktree")" "$(cat "$H/nested/e1/worktree")" "escalate: worktree sama"
+assert_eq "$(cat "$H/nested/e1-esc/branch")" "$(cat "$H/nested/e1/branch")" "escalate: cabang sama"
+assert_contains "$(cat "$H/nested/e1-esc/prompt.md")" "ESCALATION NOTE" "escalate: catatan di prompt"
+assert_contains "$(cat "$H/nested/e1-esc/prompt.md")" "status LIMIT" "escalate: status lama di catatan"
+assert_contains "$(cat "$H/nested/e1-esc/prompt.md")" "poteto-mode" "escalate: --skill terbawa"
+assert_contains "$(cat "$H/nested/e1-esc/prompt.md")" "PROJ-1: " "escalate: --ids terbawa"
+assert_contains "$(tail -1 "$H/nested/runs.jsonl")" '"escalated_from": "e1"' "escalate: runs.jsonl mencatat asal"
+assert_contains "$(tail -1 "$H/nested/runs.jsonl")" '"tier": "medium"' "escalate: runs.jsonl tier baru"
+# sudah DONE: tidak dinaikkan
+out=$("$N" escalate e1-esc 2>&1); [ $? -ne 0 ] && ok || bad "escalate DONE harus gagal"
+assert_contains "$out" "status DONE" "escalate DONE: pesan"
+# rantai: light -> medium -> heavy, nama bertambah, model & batas heavy
+run e4 light limit 60 2.5 --tier auto
+STUB_OUT="$H/args-e4a" STUB_KIND=limit "$N" escalate e4 >/dev/null 2>&1
+assert_eq "$(cat "$H/nested/e4-esc/status")" LIMIT "escalate rantai: e4-esc LIMIT"
+STUB_OUT="$H/args-e4b" STUB_KIND=ok "$N" escalate e4-esc >/dev/null 2>&1
+assert_eq "$(cat "$H/nested/e4-esc2/status")" DONE "escalate rantai: e4-esc2 selesai"
+assert_eq "$(arg e4b --model)" opus "escalate medium->heavy: model"
+assert_eq "$(arg e4b --max-turns)" 150 "escalate medium->heavy: turn"
+assert_eq "$(arg e4b --max-budget-usd)" 10 "escalate medium->heavy: biaya"
+# heavy tidak bisa naik lagi; BLOCKED dan sesi tak dikenal ditolak
+run e2h heavy limit 150 9 --tier auto
+out=$("$N" escalate e2h 2>&1); [ $? -ne 0 ] && ok || bad "escalate heavy harus gagal"
+assert_contains "$out" "tertinggi" "escalate heavy: pesan"
+run e3b light block 3 0.1 --tier auto
+out=$("$N" escalate e3b 2>&1); [ $? -ne 0 ] && ok || bad "escalate BLOCKED harus gagal"
+assert_contains "$out" "status BLOCKED" "escalate BLOCKED: pesan"
+"$N" escalate tidak-ada >/dev/null 2>&1; [ $? -ne 0 ] && ok || bad "escalate sesi hilang harus gagal"
+"$N" escalate 'a;b' >/dev/null 2>&1; [ $? -ne 0 ] && ok || bad "escalate NAME berbahaya harus gagal"
+"$N" escalate e1 --bogus >/dev/null 2>&1; [ $? -ne 0 ] && ok || bad "escalate opsi salah harus gagal"
+
 rm -rf "$H" "$E"
 finish
